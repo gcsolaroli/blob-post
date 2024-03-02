@@ -1,8 +1,23 @@
-## sbt project compiled with Scala 3
+# Sample project to hightlight an issue processing `multipart-form` uploads using `zio-http`
 
-### Usage
+Sample project using `scala 3` (3.3.3), `zio 2` (2.1-RC1), `zio-http` (3.0.0-RC4) and other ancillary ZIO libraries that highlights a problem processing `multipart-form` data in streaming mode.
 
-This is a normal sbt project. You can compile code with `sbt compile`, run it with `sbt run`, and `sbt console` will start a Scala 3 REPL.
+## Collecting more fields
+I am not sure we are using the best option to collect the different fields from the `StreamingForm` value.
+The solution we have identified kind of works, even if it feels pretty clanky.
+Any suggestion on how to do this differently is very welcome.
 
-For more information on the sbt-dotty plugin, see the
-[scala3-example-project](https://github.com/scala/scala3-example-project/blob/main/README.md).
+## Processing ZStream data
+Depending on how we process the incoming request though, we are getting different results.
+
+### `/path`
+If we do consume the full streaming data right away from the `ZStream[FormField]`, we get all the data correctly; this option is implemented in the `/path` handler.
+Unfortunately, this means we need to write all the data to a temporary file, and later re-read all the data to actually process its content.
+
+### `/data`
+Another option is we keep the ZStream around until we have collected all the needed information, and later process it altogether.
+This option is implemented in the `/data` handler; it works file with "small" file uploads (up to ~7KB in size), but hangs with bigger uploads.
+
+# What are we doing wrong
+
+Any suggestion is very welcome

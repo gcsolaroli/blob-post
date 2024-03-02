@@ -8,42 +8,89 @@ import zio.nio.file.{ Files, Path }
 import java.io.FileOutputStream
 import java.security.MessageDigest
 
+val tmpDir = Path(sys.env("TMPDIR"))
+
 object MultipartFormDataStreaming extends ZIOAppDefault {
 
-    // val tmpDir = Path(sys.env("TMPDIR"))
-    val tmpDir = Path(sys.env("TMPDIR"))
-    val targetDir = Path("target")
-    def bytesToHex (bytes: Array[Byte]): String = bytes.map("%02X" format _).mkString.toLowerCase
+    case class Identifier(value: String)
+
+    case class Blob_Data(filename: String, data: ZStream[Any, Nothing, Byte])
+    case class FormFields_Data(identifier: Option[Identifier], blob:Option[Blob_Data])
+    
+    case class Blob_Path(filename: String, path: Path)
+    case class FormFields_Path(identifier: Option[Identifier], blob:Option[Blob_Path])
+
+    def bytesToHex (bytes: Array[Byte]): String = bytes.map("%02X" format _).mkString
+
+    def doSomethingWithTheData (identifier: String, filename: String, data: ZStream[Any, Nothing, Byte]): Task[String] =
+        //  `identifier` and `filename` are not used in this sample code, but in the actual code
+        //  all three fields are needed to correctly process the request
+        data
+        .run(ZSink.digest(MessageDigest.getInstance("SHA-256")))
+        .map(chunk => bytesToHex(chunk.toArray).toLowerCase)
 
     val app: HttpApp[Any] = Routes(
-        Method.POST / "upload" -> handler: (req: Request) =>
-            if (req.header(Header.ContentType).exists(_.mediaType == MediaType.multipart.`form-data`))
-            then
-                ZIO.debug("Starting to read multipart/form stream")
-                *>
-                req.body.asMultipartFormStream.map(_.fields)
-                .flatMap(fieldStream =>
-                    val fieldData: ZStream[Any, Throwable, Byte] = fieldStream.flatMap(field => field match {
-                        case sb: FormField.StreamingBinary => sb.data
-                        case _                             => ZStream.empty
+        Method.POST / "data" -> handler: (request: Request) =>
+            request.body.asMultipartFormStream
+            .flatMap(streamingForm => streamingForm
+                .fields
+                .collectZIO(field => field match {
+                    case FormField.StreamingBinary("identifier",    contentType, transferEncoding,      filename,  data) =>
+                        data.run(ZSink.collectAll[Byte]).map(_.toArray).map(bytes => Identifier(bytesToHex(bytes)))
+                    case FormField.StreamingBinary("blob",          contentType, transferEncoding, Some(filename), data) =>
+                        ZIO.succeed(Blob_Data(filename, data))
+                })
+                .runFoldZIO(FormFields_Data(None, None))((result, field) => field match {
+                    case Identifier(value)          =>  if result.identifier == None
+                                                        then ZIO.succeed(FormFields_Data(Some(Identifier(value)), result.blob))
+                                                        else ZIO.fail(new Exception(s"Parameter 'identifier' specified more than once"))
+                    case Blob_Data(filename, data)  =>  if result.blob == None
+                                                        then ZIO.succeed(FormFields_Data(result.identifier, Some(Blob_Data(filename, data))))
+                                                        else ZIO.fail(new Exception(s"Parameter 'blob' specified more than once"))
+                })
+                .flatMap(formData => formData match {
+                    case FormFields_Data(Some(Identifier(identifier)), Some(Blob_Data(filename, data))) =>
+                        doSomethingWithTheData(identifier, filename, data)
+                    case _ =>
+                        ZIO.fail(new Exception(s"Missing either/both 'blob', 'identifier' fields"))
+                })
+            )
+            .map(hash => Response.text(hash))
+        ,
+        Method.POST / "path" -> handler: (request: Request) =>
+            ZIO.scoped:
+                request.body.asMultipartFormStream
+                .flatMap(streamingForm => streamingForm
+                    .fields
+                    .collectZIO(field => field match {
+                        case FormField.StreamingBinary("identifier",    contentType, transferEncoding,      filename,  data) =>
+                            data.run(ZSink.collectAll[Byte]).map(_.toArray).map(bytes => Identifier(bytesToHex(bytes)))
+                        case FormField.StreamingBinary("blob",          contentType, transferEncoding, Some(filename), data) =>
+                            Files.createTempFileInScoped(dir=tmpDir, suffix=".tmp", prefix=None, fileAttributes = Nil)
+                            .flatMap(tmpFile => data
+                                .run(ZSink.fromOutputStream(new FileOutputStream(tmpFile.toFile)))
+                                .map(_ => Blob_Path(filename, tmpFile))
+                            )
                     })
-                    ZIO.scoped:
-                        Files.createTempFileInScoped(dir=tmpDir, suffix=".tmp", prefix=None, fileAttributes = Nil)
-                        .tap(tmpFile => ZIO.log(s"TEMP FILE: ${tmpFile}"))
-                        .flatMap { tmpFile => fieldData
-                            .timeoutFail(new Exception)(Duration.fromMillis(10000))
-                            .tapSink(ZSink.fromOutputStream(new FileOutputStream(tmpFile.toFile)))
-                            .run(ZSink.digest(MessageDigest.getInstance("SHA-256").nn))
-                            .map((chunk: Chunk[Byte]) => bytesToHex(chunk.toArray))
-                            .map(hash => (tmpFile, hash))
-                        }
-                        .flatMap((tmpFile, hash) =>
-                            Files.move(tmpFile, targetDir / "test.blob")
-                            .map(_ => hash)
-                        )
+                    .runFoldZIO(FormFields_Path(None, None))((result, field) => field match {
+                        case Identifier(value)          =>  if result.identifier == None
+                                                            then ZIO.succeed(FormFields_Path(Some(Identifier(value)), result.blob))
+                                                            else ZIO.fail(new Exception(s"Parameter 'identifier' specified more than once"))
+                        case Blob_Path(filename, path)  =>  if result.blob == None
+                                                            then ZIO.succeed(FormFields_Path(result.identifier, Some(Blob_Path(filename, path))))
+                                                            else ZIO.fail(new Exception(s"Parameter 'blob' specified more than once"))
+                    })
+                    .flatMap(formData => formData match {
+                        case FormFields_Path(Some(Identifier(identifier)), Some(Blob_Path(filename, path))) =>
+                            Files.readAllBytes(path)
+                            .map(ZStream.fromChunk)
+                            .flatMap(data => doSomethingWithTheData(identifier, filename, data))
+                        case _ =>
+                            ZIO.fail(new Exception(s"Missing either/both 'blob', 'identifier' fields"))
+                    })
                 )
                 .map(hash => Response.text(hash))
-            else ZIO.succeed(Response(status = Status.NotFound))
+        ,
     ).sandbox.toHttpApp @@ Middleware.debug
 
     private def program: ZIO[Server, Throwable, Unit] =
@@ -56,7 +103,6 @@ object MultipartFormDataStreaming extends ZIOAppDefault {
     override def run: ZIO[Any with ZIOAppArgs with Scope, Any, Any] =
         program
             .provide(
-                // ZLayer.succeed(Server.Config.default.enableRequestStreaming),
                 ZLayer.succeed(Server.Config.default.requestStreaming(RequestStreaming.Enabled)),
                 Server.live,
             )

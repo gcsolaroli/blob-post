@@ -10,6 +10,8 @@ import zio.test.TestResult.{ allSuccesses }
 import zio.ZLayer
 import scala.util.boundary
 import zio.http.Server.RequestStreaming
+import zio.nio.charset.Charset
+import zio.test.TestResult
 
 
 val blob_1K     = "0dfba6266bcebf53a0ed863f5df4edf56066e6a5194df242a2b31f13bf7bb9f8"
@@ -33,43 +35,53 @@ val blob_1M     = "4073041693a9a66983e6ffb75b521310d30e6db60afc0f97d440cb816bce7
 object BlobSpec extends ZIOSpecDefault:
     def readSampleBlob (blobHash: String): Task[ZStream[Any, Nothing, Byte]] = Files.readAllBytes(Path(s"src/test/resources/blobs/${blobHash}.blob")).map(ZStream.fromChunk)
 
-    def post (identifier: String, boundary: Boundary, data: ZStream[Any, Nothing, Byte]) = Request(
-        url = URL(Root / "upload"),
-        method = Method.POST,
-        body = Body.fromStream(
-            Form(
-                FormField.textField(name="identifier", value="", mediaType = MediaType.text.`plain`),
-                FormField.StreamingBinary(
-                      name = "blob"
-                    , data = data
-                    , filename = Some(identifier)
-                    , contentType = MediaType.application.`octet-stream`
-                ),
-            )
-            .multipartBytes(boundary)
-        ).contentType(newMediaType = MediaType.multipart.`form-data`, newBoundary = boundary),
-        headers = Headers(Header.ContentType(MediaType.multipart.`form-data`)),
-        version = Version.Http_1_1,
+    def post (path: String, identifier: String, boundary: Boundary, data: ZStream[Any, Nothing, Byte]): Task[Request] =
+        Charset.Standard.utf8.encodeString(identifier)
+        .map(identifierChunks => Request(
+            url = URL(Root / path),
+            method = Method.POST,
+            body = Body.fromStream(
+                Form(
+                    FormField.binaryField(name = "identifier", data = identifierChunks, mediaType = MediaType.application.`octet-stream`),
+                    FormField.StreamingBinary(
+                        name = "blob"
+                        , data = data
+                        , filename = Some(identifier)
+                        , contentType = MediaType.application.`octet-stream`
+                    ),
+                )
+                .multipartBytes(boundary)
+            ).contentType(newMediaType = MediaType.multipart.`form-data`, newBoundary = boundary),
+            headers = Headers(Header.ContentType(MediaType.multipart.`form-data`)),
+            version = Version.Http_1_1
+        )
     )
 
+    def testFileUpload (path:String, filename: String): ZIO[Any, Throwable, TestResult] =
+        for {
+            boundary    <- Boundary.randomUUID
+            content     <- readSampleBlob(filename)
+            request     <- post(path, filename, boundary, content)
+            response    <- MultipartFormDataStreaming.app.runZIO(request)
+            body        <- response.body.asString
+        } yield allSuccesses(
+            assertTrue(response.status.code == 200),
+            assertTrue(body == filename)
+        )
+
     def spec = suite("BlobApis")(
-        test("POST large blob") {
-            // val file_signature = blob_8K
-            val file_signature = blob_1M
-            for {
-                boundary <- Boundary.randomUUID
-                content  <- readSampleBlob(file_signature)
-                response <- MultipartFormDataStreaming.app.runZIO(post(file_signature, boundary, content))
-                body     <- response.body.asString
-            } yield allSuccesses(
-                assertTrue(response.status.code == 200),
-                // assertTrue(body == "8274")
-                assertTrue(body == file_signature)
-            )
-        } @@ TestAspect.timeout(10.second),
+        test("POST very small blob 'data'") { testFileUpload("data", blob_1K) },
+        test("POST small blob 'data'")      { testFileUpload("data", blob_7K) },
+        test("POST largish blob 'data'")    { testFileUpload("data", blob_8K) },    //  Fails
+        test("POST large blob 'data'")      { testFileUpload("data", blob_1M) },    //  Fails
+
+        test("POST very small blob 'path'") { testFileUpload("path", blob_1K) },
+        test("POST small blob 'path'")      { testFileUpload("path", blob_7K) },
+        test("POST largish blob 'path'")    { testFileUpload("path", blob_8K) },
+        test("POST large blob 'path'")      { testFileUpload("path", blob_1M) },
     ).provideLayerShared(environment)
     @@ TestAspect.sequential
-    @@ TestAspect.timeout(30.second)
+    @@ TestAspect.timeout(3.second)
 
     val environment: ZLayer[Any, Throwable, Unit] =
         ZLayer.succeed(Server.Config.default.requestStreaming(RequestStreaming.Enabled))
