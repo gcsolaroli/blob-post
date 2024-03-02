@@ -18,6 +18,6 @@ Unfortunately, this means we need to write all the data to a temporary file, and
 Another option is we keep the ZStream around until we have collected all the needed information, and later process it altogether.
 This option is implemented in the `/data` handler; it works file with "small" file uploads (up to ~7KB in size), but hangs with bigger uploads.
 
-# What are we doing wrong
+# What are we doing wrong?
 
 Any suggestion is very welcome
