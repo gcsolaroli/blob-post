@@ -1,4 +1,4 @@
-# Sample project to hightlight an issue processing `multipart-form` uploads using `zio-http`
+# Sample project to highlight an issue processing `multipart-form` uploads using `zio-http`
 
 Sample project using `scala 3` (3.3.3), `zio 2` (2.1-RC1), `zio-http` (3.0.0-RC4) and other ancillary ZIO libraries that highlights a problem processing `multipart-form` data in streaming mode.
 
