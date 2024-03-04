@@ -50,7 +50,8 @@ object BlobSpec extends ZIOSpecDefault:
                         , contentType = MediaType.application.`octet-stream`
                     ),
                 )
-                .multipartBytes(boundary)
+                .multipartBytes(boundary),
+                0L
             ).contentType(newMediaType = MediaType.multipart.`form-data`, newBoundary = boundary),
             headers = Headers(Header.ContentType(MediaType.multipart.`form-data`)),
             version = Version.Http_1_1
