@@ -1,8 +1,8 @@
 ThisBuild / scalaVersion := "3.3.3"
+ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 
 val zio_version =         "2.1-RC1"
-// val zio_http_version =    "3.0.0-RC4"
-val zio_http_version =    "3.0.0-RC4+81-57502a13+20240304-1711-SNAPSHOT"
+val zio_http_version =    "3.0.0-RC4+81-57502a13-SNAPSHOT"
 val zio_logging_version = "2.1.12"
 val zio_nio_version =     "2.0.2"
 
