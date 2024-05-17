@@ -29,7 +29,7 @@ object MultipartFormDataStreaming extends ZIOAppDefault {
         .run(ZSink.digest(MessageDigest.getInstance("SHA-256")))
         .map(chunk => bytesToHex(chunk.toArray).toLowerCase)
 
-    val app: HttpApp[Any] = Routes(
+    val app: Routes[Any, Nothing] = Routes(
         Method.POST / "data" -> handler: (request: Request) =>
             request.body.asMultipartFormStream
             .flatMap(streamingForm => streamingForm
@@ -91,7 +91,7 @@ object MultipartFormDataStreaming extends ZIOAppDefault {
                 )
                 .map(hash => Response.text(hash))
         ,
-    ).sandbox.toHttpApp @@ Middleware.debug
+    ).sandbox @@ Middleware.debug
 
     private def program: ZIO[Server, Throwable, Unit] =
         for {
@@ -100,7 +100,7 @@ object MultipartFormDataStreaming extends ZIOAppDefault {
             _    <- ZIO.never
         } yield ()
 
-    override def run: ZIO[Any with ZIOAppArgs with Scope, Any, Any] =
+    override def run: ZIO[Any & ZIOAppArgs & Scope, Any, Any] =
         program
             .provide(
                 ZLayer.succeed(Server.Config.default.requestStreaming(RequestStreaming.Enabled)),

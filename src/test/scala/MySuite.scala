@@ -38,7 +38,7 @@ object BlobSpec extends ZIOSpecDefault:
     def post (path: String, identifier: String, boundary: Boundary, data: ZStream[Any, Nothing, Byte]): Task[Request] =
         Charset.Standard.utf8.encodeString(identifier)
         .map(identifierChunks => Request(
-            url = URL(Root / path),
+            url = URL(zio.http.Path.root / path),
             method = Method.POST,
             body = Body.fromStream(
                 Form(
