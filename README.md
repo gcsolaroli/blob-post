@@ -1,6 +1,6 @@
 # Sample project to highlight an issue processing `multipart-form` uploads using `zio-http`
 
-Sample project using `scala 3` (3.4.2), `zio 2` (2.1.1), `zio-http` (3.0.0-RC7) and other ancillary ZIO libraries that highlights a problem processing `multipart-form` data in streaming mode.
+Sample project using `scala 3` (3.4.2), `zio 2` (2.1.2), `zio-http` (3.0.0-RC8) and other ancillary ZIO libraries that highlights a problem processing `multipart-form` data in streaming mode.
 
 ## Collecting more fields
 I am not sure we are using the best option to collect the different fields from the `StreamingForm` value.
